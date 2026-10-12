@@ -1,0 +1,16 @@
+{
+  "name": "paddleball",
+  "version": "1.0.0",
+  "description": "",
+  "main": "gameLogic.js",
+  "scripts": {
+    "test": "node gameLogic.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
+}

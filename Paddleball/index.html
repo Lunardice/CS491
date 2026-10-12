@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paddle Ball</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #AEC6CF; /* pastel blue (user customization) */
+    }
+
+    #gameCanvas {
+      display: block;
+      background-color: #AEC6CF; /* pastel blue (user customization) */
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="600" height="300"></canvas>
+  <script>
+    // --- Canvas setup ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Canvas dimensions (600x300)
+    const CANVAS_WIDTH = canvas.width;   // 600
+    const CANVAS_HEIGHT = canvas.height; // 300
+
+    // --- Tunable gameplay constants (user customizations) ---
+    const FAST = 6;              // Ball speed magnitude (fast)
+    const PADDLE_SPEED = 3;      // Player paddle movement speed (slow - nerfed)
+    const PADDLE_WIDTH = 10;     // Paddle width (normal)
+    const PADDLE_HEIGHT = 80;    // Paddle height (normal)
+    const AI_FACTOR = 0.5;       // AI difficulty (easy - nerfed) - used by AI task later
+
+    // --- Colors ---
+    const BALL_COLOR = '#FFD1DC';       // pastel pink
+    const PADDLE_COLOR = 'white';
+    const BACKGROUND_COLOR = '#AEC6CF'; // pastel blue
+
+    // --- Ball geometry ---
+    const BALL_RADIUS = 8; // radius of the ball circle (px)
+
+    // --- Scoreboard model (fancy scoreboard, first to 5 wins) ---
+    // Left paddle is the COMPUTER (AI); right paddle is the PLAYER.
+    let leftScore = 0;
+    let rightScore = 0;
+    const WIN_SCORE = 5; // "First to 5 wins" (user customization)
+    let gameOver = false; // set once a side reaches WIN_SCORE; freezes the game
+
+    // --- Art Deco scoreboard palette ---
+    const DECO_GOLD = '#E8C87E'; // soft gold accents (frame lines, net, chevrons)
+    const DECO_NAVY = '#2C3E50'; // deep navy for scores / win banner text
+    // Art Deco style font stack: bold geometric sans with serif fallback.
+    const DECO_FONT = "'Century Gothic', 'Futura', 'Georgia', sans-serif";
+
+    // --- Ball state ---
+    // Ball starts at the center of the canvas.
+    let ballX = CANVAS_WIDTH / 2;  // 300
+    let ballY = CANVAS_HEIGHT / 2; // 150
+    let dx = 0;
+    let dy = 0;
+
+    // Initialize the ball at center with a randomized direction.
+    // Horizontal speed magnitude is always FAST; left/right and up/down are random.
+    function resetBall() {
+      ballX = CANVAS_WIDTH / 2;
+      ballY = CANVAS_HEIGHT / 2;
+      dx = (Math.random() < 0.5 ? -1 : 1) * FAST;
+      dy = (Math.random() < 0.5 ? -1 : 1) * FAST;
+    }
+    resetBall();
+
+    // --- Paddle state ---
+    // Paddles start centered vertically.
+    let leftY = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2;  // 110
+    let rightY = (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2; // 110
+
+    // --- Drawing ---
+
+    // Fill the entire canvas with the background color, clearing the previous frame.
+    function clearCanvas() {
+      ctx.fillStyle = BACKGROUND_COLOR; // pastel blue (#AEC6CF)
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    }
+
+    // Draw the ball as a filled circle at (ballX, ballY).
+    function drawBall() {
+      ctx.fillStyle = BALL_COLOR; // pastel pink (#FFD1DC)
+      ctx.beginPath();
+      ctx.arc(ballX, ballY, BALL_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw both paddles as filled rectangles.
+    // Left paddle hugs the left edge; right paddle hugs the right edge.
+    function drawPaddles() {
+      ctx.fillStyle = PADDLE_COLOR; // white
+      // Left paddle at x = 0
+      ctx.fillRect(0, leftY, PADDLE_WIDTH, PADDLE_HEIGHT);
+      // Right paddle at x = CANVAS_WIDTH - PADDLE_WIDTH
+      ctx.fillRect(CANVAS_WIDTH - PADDLE_WIDTH, rightY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    }
+
+    // --- Fancy Art Deco scoreboard ---
+    //
+    // Draws a symmetrical, geometric scoreboard inspired by Art Deco: a
+    // dashed-with-diamond vertical net down the middle, the two scores shown
+    // large near the top (COMPUTER on the left half, PLAYER on the right half),
+    // stepped/chevron accents framing each score, and thin gold framing lines.
+    // Everything is drawn in the top band of the 600x300 canvas so it never
+    // obscures active gameplay. Colors (soft gold + deep navy) are chosen to
+    // read clearly against the pastel blue background.
+    function drawScoreboard() {
+      const cx = CANVAS_WIDTH / 2;
+
+      ctx.save();
+
+      // --- Center net: dashed vertical line with Art Deco diamonds ---
+      ctx.strokeStyle = DECO_GOLD;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, CANVAS_HEIGHT);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Small diamonds marching down the net for a geometric Deco accent.
+      ctx.fillStyle = DECO_GOLD;
+      for (let y = 24; y < CANVAS_HEIGHT; y += 60) {
+        ctx.beginPath();
+        ctx.moveTo(cx, y - 5);
+        ctx.lineTo(cx + 5, y);
+        ctx.lineTo(cx, y + 5);
+        ctx.lineTo(cx - 5, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // --- Thin gold framing line across the top band (symmetrical) ---
+      ctx.strokeStyle = DECO_GOLD;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(20, 54);
+      ctx.lineTo(CANVAS_WIDTH - 20, 54);
+      ctx.stroke();
+      // Stepped end-caps (little Art Deco "ziggurat" steps) at each end.
+      drawStep(20, 54, -1);
+      drawStep(CANVAS_WIDTH - 20, 54, 1);
+
+      // --- Side labels: which paddle is which ---
+      ctx.fillStyle = DECO_NAVY;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.font = `bold 11px ${DECO_FONT}`;
+      // letterSpacing is honored in modern canvas implementations; harmless if not.
+      ctx.letterSpacing = '3px';
+      ctx.fillText('C O M P U T E R', CANVAS_WIDTH * 0.25, 20);
+      ctx.fillText('P L A Y E R', CANVAS_WIDTH * 0.75, 20);
+      ctx.letterSpacing = '0px';
+
+      // --- The two scores, large, flanked by chevron accents ---
+      ctx.font = `bold 34px ${DECO_FONT}`;
+      ctx.fillStyle = DECO_NAVY;
+      ctx.fillText(String(leftScore), CANVAS_WIDTH * 0.25, 50);
+      ctx.fillText(String(rightScore), CANVAS_WIDTH * 0.75, 50);
+
+      // Chevron accents on the outer side of each score.
+      drawChevron(CANVAS_WIDTH * 0.25 - 44, 38, DECO_GOLD);
+      drawChevron(CANVAS_WIDTH * 0.75 + 44, 38, DECO_GOLD, true);
+
+      // --- Win banner (shown only when the game is over) ---
+      const winner = checkWinner(leftScore, rightScore, WIN_SCORE);
+      if (winner) {
+        // Dim the play area so the banner stands out.
+        ctx.fillStyle = 'rgba(44, 62, 80, 0.35)'; // translucent navy
+        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        const label = winner === 'left' ? 'COMPUTER WINS' : 'PLAYER WINS';
+
+        // Decorative framing lines above and below the banner text.
+        ctx.strokeStyle = DECO_GOLD;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx - 150, CANVAS_HEIGHT / 2 - 26);
+        ctx.lineTo(cx + 150, CANVAS_HEIGHT / 2 - 26);
+        ctx.moveTo(cx - 150, CANVAS_HEIGHT / 2 + 20);
+        ctx.lineTo(cx + 150, CANVAS_HEIGHT / 2 + 20);
+        ctx.stroke();
+
+        ctx.fillStyle = DECO_GOLD;
+        ctx.font = `bold 30px ${DECO_FONT}`;
+        ctx.letterSpacing = '4px';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, cx, CANVAS_HEIGHT / 2 + 8);
+        ctx.font = `bold 11px ${DECO_FONT}`;
+        ctx.letterSpacing = '3px';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText('FIRST TO ' + WIN_SCORE + ' WINS', cx, CANVAS_HEIGHT / 2 + 44);
+        ctx.letterSpacing = '0px';
+      }
+
+      ctx.restore();
+    }
+
+    // Draw a small stepped (ziggurat) Art Deco accent anchored at (x, y).
+    // dir = -1 steps to the left, +1 steps to the right.
+    function drawStep(x, y, dir) {
+      ctx.fillStyle = DECO_GOLD;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(x + dir * i * 4, y - 2 - i * 4, 4, 4);
+      }
+    }
+
+    // Draw a chevron (>) accent pointing inward, centered near (x, y).
+    // flip = true mirrors it to point the other way.
+    function drawChevron(x, y, color, flip = false) {
+      const s = flip ? -1 : 1;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 7);
+      ctx.lineTo(x + s * 7, y);
+      ctx.lineTo(x, y + 7);
+      ctx.stroke();
+    }
+
+    // Render a single frame: clear the canvas, draw the ball and paddles, then
+    // overlay the scoreboard (and win banner, if the game is over).
+    function draw() {
+      clearCanvas();
+      drawBall();
+      drawPaddles();
+      drawScoreboard();
+    }
+
+    // --- Movement & collision logic ---
+    //
+    // The core collision/reset logic is written as pure helper functions that
+    // take an explicit ball/paddle state and geometry object and return a new
+    // ball state. This keeps the logic free of canvas/DOM dependencies so it can
+    // be exercised directly by the fast-check property tests (see gameLogic.js /
+    // gameLogic.test.js). The identical helpers live in gameLogic.js as the
+    // testable source of truth; they are duplicated here only to keep index.html
+    // a single self-contained file.
+
+    // Reverse vertical direction if the ball is touching the top or bottom wall.
+    // state: { x, y, dx, dy }
+    // geom:  { width, height, radius }
+    function applyWallBounce(state, geom) {
+      let { x, y, dx, dy } = state;
+      const hitTop = y - geom.radius <= 0;
+      const hitBottom = y + geom.radius >= geom.height;
+      if (hitTop || hitBottom) {
+        dy = -dy;
+      }
+      return { x, y, dx, dy };
+    }
+
+    // Returns true if the ball overlaps either paddle.
+    // paddles: { paddleWidth, paddleHeight, leftY, rightY }
+    function isTouchingPaddle(state, geom, paddles) {
+      const { x, y } = state;
+      // Left paddle occupies x in [0, paddleWidth], y in [leftY, leftY+paddleHeight]
+      const touchingLeft =
+        x - geom.radius <= paddles.paddleWidth &&
+        y >= paddles.leftY &&
+        y <= paddles.leftY + paddles.paddleHeight;
+      // Right paddle occupies x in [width-paddleWidth, width]
+      const touchingRight =
+        x + geom.radius >= geom.width - paddles.paddleWidth &&
+        y >= paddles.rightY &&
+        y <= paddles.rightY + paddles.paddleHeight;
+      return touchingLeft || touchingRight;
+    }
+
+    // Reverse horizontal direction if the ball is touching a paddle.
+    function applyPaddleBounce(state, geom, paddles) {
+      let { x, y, dx, dy } = state;
+      if (isTouchingPaddle(state, geom, paddles)) {
+        dx = -dx;
+      }
+      return { x, y, dx, dy };
+    }
+
+    // Determine whether the ball has gone off an edge.
+    // Returns 'left', 'right', or null.
+    function offEdge(state, geom) {
+      if (state.x - geom.radius < 0) return 'left';
+      if (state.x + geom.radius > geom.width) return 'right';
+      return null;
+    }
+
+    // Advance the ball one step by applying velocity.
+    function stepBall(state) {
+      return { x: state.x + state.dx, y: state.y + state.dy, dx: state.dx, dy: state.dy };
+    }
+
+    // Clamp a paddle's top position so the paddle stays fully within the canvas.
+    // Valid range is [0, canvasHeight - paddleHeight]. (Mirrors gameLogic.js.)
+    function clampPaddle(y, canvasHeight, paddleHeight) {
+      const max = canvasHeight - paddleHeight;
+      if (y < 0) return 0;
+      if (y > max) return max;
+      return y;
+    }
+
+    // Compute the AI (left) paddle's next top position for one frame.
+    // The AI follows the ball by moving a `factor` fraction of the distance
+    // between the paddle center and the ball each frame. AI_FACTOR=0.9 (hard)
+    // tracks quickly but never instantly, keeping the AI beatable. The result
+    // is clamped so the paddle stays on screen. (Mirrors gameLogic.js.)
+    function aiPaddleStep(leftY, ballY, paddleHeight, factor, canvasHeight) {
+      const paddleCenter = leftY + paddleHeight / 2;
+      const delta = ballY - paddleCenter;
+      const nextY = leftY + delta * factor;
+      return clampPaddle(nextY, canvasHeight, paddleHeight);
+    }
+
+    // Determine the winner once a side reaches the winning score.
+    // Returns 'left' (COMPUTER), 'right' (PLAYER), or null if no winner yet.
+    // (Mirrors checkWinner in gameLogic.js, the testable source of truth.)
+    function checkWinner(leftScore, rightScore, winScore) {
+      const leftWon = leftScore >= winScore;
+      const rightWon = rightScore >= winScore;
+      if (leftWon && rightWon) {
+        return leftScore >= rightScore ? 'left' : 'right';
+      }
+      if (leftWon) return 'left';
+      if (rightWon) return 'right';
+      return null;
+    }
+
+    // --- Player input (right paddle) ---
+    //
+    // Key-state approach: keydown/keyup record whether Up/Down are currently
+    // held, and the per-frame movement is applied in update(). This produces
+    // smooth, continuous movement while a key is held down.
+    const keys = { up: false, down: false };
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowUp') {
+        keys.up = true;
+        event.preventDefault(); // stop the page from scrolling
+      } else if (event.key === 'ArrowDown') {
+        keys.down = true;
+        event.preventDefault(); // stop the page from scrolling
+      }
+    });
+
+    window.addEventListener('keyup', (event) => {
+      if (event.key === 'ArrowUp') {
+        keys.up = false;
+        event.preventDefault();
+      } else if (event.key === 'ArrowDown') {
+        keys.down = false;
+        event.preventDefault();
+      }
+    });
+
+    // --- update(): advances game state by one frame ---
+    function update() {
+      // Once the game is over, stop advancing the simulation entirely so the
+      // ball and paddles freeze on the final frame while the win banner shows.
+      if (gameOver) return;
+
+      const geom = { width: CANVAS_WIDTH, height: CANVAS_HEIGHT, radius: BALL_RADIUS };
+
+      // --- Player input: move the right paddle based on held arrow keys ---
+      // Up arrow moves the paddle up (decreasing y), down arrow moves it down
+      // (increasing y). Movement is PADDLE_SPEED per frame while a key is held.
+      if (keys.up) {
+        rightY -= PADDLE_SPEED;
+      }
+      if (keys.down) {
+        rightY += PADDLE_SPEED;
+      }
+      // Keep the right paddle fully within the canvas: [0, CANVAS_HEIGHT - PADDLE_HEIGHT].
+      rightY = clampPaddle(rightY, CANVAS_HEIGHT, PADDLE_HEIGHT);
+
+      // --- AI: move the left paddle to follow the ball's vertical position ---
+      // AI_FACTOR (0.9, hard) controls how much of the distance to the ball the
+      // paddle covers each frame; aiPaddleStep clamps the result on screen.
+      leftY = aiPaddleStep(leftY, ballY, PADDLE_HEIGHT, AI_FACTOR, CANVAS_HEIGHT);
+
+      const paddles = { paddleWidth: PADDLE_WIDTH, paddleHeight: PADDLE_HEIGHT, leftY, rightY };
+
+      // Move the ball by its velocity.
+      let state = stepBall({ x: ballX, y: ballY, dx, dy });
+
+      // Bounce off top/bottom walls (reverse dy).
+      state = applyWallBounce(state, geom);
+
+      // Bounce off paddles (reverse dx).
+      state = applyPaddleBounce(state, geom, paddles);
+
+      // Write the advanced state back to the game variables.
+      ballX = state.x;
+      ballY = state.y;
+      dx = state.dx;
+      dy = state.dy;
+
+      // Off-edge handling: award a point and reset to center.
+      const edge = offEdge({ x: ballX, y: ballY }, geom);
+      if (edge === 'left') {
+        // Ball left the LEFT edge -> right player scored.
+        rightScore++;
+        resetBall();
+      } else if (edge === 'right') {
+        // Ball left the RIGHT edge -> left player scored.
+        leftScore++;
+        resetBall();
+      }
+
+      // First to WIN_SCORE wins: if either side reached it, end the game.
+      if (checkWinner(leftScore, rightScore, WIN_SCORE) !== null) {
+        gameOver = true;
+      }
+    }
+
+    // --- Game loop ---
+    // gameLoop() advances the simulation one frame (update) and renders it
+    // (draw). setInterval drives it continuously at ~60 FPS (16ms per frame),
+    // so the game runs on its own without any user intervention (Req 3.4).
+    function gameLoop() {
+      update();
+      draw();
+    }
+
+    // Render the initial frame immediately so the game is visible on load,
+    // then start the continuous loop.
+    draw();
+    setInterval(gameLoop, 16); // ~60 FPS
+  </script>
+</body>
+</html>
